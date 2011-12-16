@@ -14,21 +14,23 @@ def parse_from_halcon(hstring):
     frame_dict = {}
     for pair in hstring.split(';'):
         pose = pair.split(':')[1].split(',')
+        error = pose[len(pose)-1].split('|').pop()
+        pose[len(pose)-1] = pose[len(pose)-1].split('|')[0]
         for i in range(len(pose)):
             pose[i] = float(pose[i])
-        frame_dict.update({int(pair.split(':')[0]):pose})
+        frame_dict.update({int(pair.split(':')[0]):[pose,error]})
     for item in frame_dict:
-        trans_vec = [frame_dict[item][0],frame_dict[item][1],\
-                     frame_dict[item][2]]
+        trans_vec = [frame_dict[item][0][0],frame_dict[item][0][1],\
+                     frame_dict[item][0][2]]
         rot_mat = [[] for x in range(3)]
         for i in range(3):
-            rot_mat[i] = [frame_dict[item][3*(i+1)],\
-                          frame_dict[item][3*(i+1)+1],\
-                          frame_dict[item][3*(i+1)+2]]
+            rot_mat[i] = [frame_dict[item][0][3*(i+1)],\
+                          frame_dict[item][0][3*(i+1)+1],\
+                          frame_dict[item][0][3*(i+1)+2]]
         t = Point(trans_vec)
         r = Rotation.from_rotation_matrix(rot_mat)
         pose = Pose(t,r)
-        frame_dict[item] = pose
+        frame_dict[item][0] = pose
     return frame_dict
     
 
