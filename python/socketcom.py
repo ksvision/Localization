@@ -64,26 +64,30 @@ def parse_from_halcon(hstring):
     @return: Camera ID and target pose.
     @rtype: C{str}, L{Pose}
     """
-    global cf_markers
+    frame_dict = {}
     for pair in hstring.split(';'):
-        ID = int(pair.split(':')[0])
         pose = pair.split(':')[1].split(',')
-        error = float(pose[len(pose)-1].split('|').pop())
+        weight = float(pose[len(pose)-1].split('|').pop())
         pose[len(pose)-1] = pose[len(pose)-1].split('|')[0]
         for i in range(len(pose)):
             pose[i] = float(pose[i])
-        trans_vec = [pose[0], pose[1], pose[2]]
+        frame_dict.update({int(pair.split(':')[0]): \
+                           {'pose':pose, 'weight':weight}})
+    for item in frame_dict:
+        trans_vec = [frame_dict[item]['pose'][0],frame_dict[item]['pose'][1],\
+                     frame_dict[item]['pose'][2]]
         rot_mat = [[] for x in range(3)]
         for i in range(3):
-            rot_mat[i] = [pose[3*(i+1)], pose[3*(i+1)+1], pose[3*(i+1)+2]]
+            rot_mat[i] = [frame_dict[item]['pose'][3*(i+1)], \
+                          frame_dict[item]['pose'][3*(i+1)+1], \
+                          frame_dict[item]['pose'][3*(i+1)+2]]
         t = Point(trans_vec)
         r = Rotation.from_rotation_matrix(rot_mat)
         pose = Pose(t,r)
-        cf_markers.append(Marker(ID,pose,error))
+        frame_dict[item]['pose'] = pose
+    return frame_dict
 
 def main():
-    global cf_markers
-    
     # set up network socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('localhost',5678))
@@ -95,9 +99,10 @@ def main():
 
     try:
         for i in range(7):
-            cf_markers = []
+            frame_dict = {}
             hstring = channel.recv(65536)
-            parse_from_halcon(hstring)
+            frame_dict = parse_from_halcon(hstring)
+            print frame_dict
     finally:
         channel.close()
         sock.close()
