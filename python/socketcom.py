@@ -64,28 +64,28 @@ def parse_from_halcon(hstring):
     @return: Camera ID and target pose.
     @rtype: C{str}, L{Pose}
     """
-    frame_dict = {}
+    frame_markers = {}
     for pair in hstring.split(';'):
         pose = pair.split(':')[1].split(',')
         weight = float(pose[len(pose)-1].split('|').pop())
         pose[len(pose)-1] = pose[len(pose)-1].split('|')[0]
         for i in range(len(pose)):
             pose[i] = float(pose[i])
-        frame_dict.update({int(pair.split(':')[0]): \
+        frame_markers.update({int(pair.split(':')[0]): \
                            {'pose':pose, 'weight':weight}})
-    for item in frame_dict:
-        trans_vec = [frame_dict[item]['pose'][0],frame_dict[item]['pose'][1],\
-                     frame_dict[item]['pose'][2]]
+    for marker in frame_markers:
+        trans_vec = [frame_markers[marker]['pose'][0],frame_markers[marker]['pose'][1],\
+                     frame_markers[marker]['pose'][2]]
         rot_mat = [[] for x in range(3)]
         for i in range(3):
-            rot_mat[i] = [frame_dict[item]['pose'][3*(i+1)], \
-                          frame_dict[item]['pose'][3*(i+1)+1], \
-                          frame_dict[item]['pose'][3*(i+1)+2]]
+            rot_mat[i] = [frame_markers[marker]['pose'][3*(i+1)], \
+                          frame_markers[marker]['pose'][3*(i+1)+1], \
+                          frame_markers[marker]['pose'][3*(i+1)+2]]
         t = Point(trans_vec)
         r = Rotation.from_rotation_matrix(rot_mat)
         pose = Pose(t,r)
-        frame_dict[item]['pose'] = pose
-    return frame_dict
+        frame_markers[marker]['pose'] = pose
+    return frame_markers
 
 def main():
     # set up network socket
@@ -98,11 +98,31 @@ def main():
     channel.settimeout(20)
 
     try:
+        # parse the incoming information from halcon
         for i in range(7):
-            frame_dict = {}
+            frame_markers = {}
             hstring = channel.recv(65536)
-            frame_dict = parse_from_halcon(hstring)
-            print frame_dict
+            frame_markers = parse_from_halcon(hstring)
+
+        # find the relative poses of the markers (in the current frame) w.r.t. one another
+        relative_poses = {}
+        for marker in frame_markers:
+            marker_a = frame_markers[marker]
+            for other in frame_markers:
+                try:
+                    assert other != marker
+                    assert other not in frame_markers[marker]
+                except AssertionError:
+                    continue
+                marker_b = frame_markers[other]
+                pose_ab = marker_a['pose'] - marker_b['pose']
+                pose_ba = -pose_ab
+                weight_ab = marker_a['weight'] + marker_b['weight']
+                weight_ba = weight_ab
+                relative_poses[marker] = {other:{'pose': pose_ab, 'weight': weight_ab}}
+                relative_poses[other] = {marker:{'pose': pose_ba, 'weight': weight_ba}}
+        print relative_poses
+                
     finally:
         channel.close()
         sock.close()
