@@ -1,5 +1,6 @@
 import socket
 from adolphus.geometry import Pose, Point, Rotation
+from hypergraph.core import Edge, Graph
 
 class Marker(object):
     """\
@@ -98,31 +99,36 @@ def main():
     channel.settimeout(20)
 
     try:
-        # parse the incoming information from halcon
+        # initialize empty graph
+        graph = Graph()
+        
         for i in range(7):
+            # parse the incoming information from halcon
             frame_markers = {}
             hstring = channel.recv(65536)
             frame_markers = parse_from_halcon(hstring)
 
-        # find the relative poses of the markers (in the current frame) w.r.t. one another
-        relative_poses = {}
-        for marker in frame_markers:
-            marker_a = frame_markers[marker]
-            for other in frame_markers:
-                try:
-                    assert other != marker
-                    assert other not in frame_markers[marker]
-                except AssertionError:
-                    continue
-                marker_b = frame_markers[other]
-                pose_ab = marker_a['pose'] - marker_b['pose']
-                pose_ba = -pose_ab
-                weight_ab = marker_a['weight'] + marker_b['weight']
-                weight_ba = weight_ab
-                relative_poses[marker] = {other:{'pose': pose_ab, 'weight': weight_ab}}
-                relative_poses[other] = {marker:{'pose': pose_ba, 'weight': weight_ba}}
-        print relative_poses
-                
+            # find the relative poses of the current frame markers w.r.t. one another
+            local_relposes = {}
+            for marker in frame_markers:
+                marker_a = frame_markers[marker]
+                for other in frame_markers:
+                    try:
+                        assert other != marker
+                        assert (marker, other) not in local_relposes
+                    except AssertionError:
+                        continue
+                    marker_b = frame_markers[other]
+                    pose_ab = marker_a['pose'] - marker_b['pose']
+                    pose_ba = -pose_ab
+                    weight_ab = marker_a['weight'] + marker_b['weight']
+                    weight_ba = weight_ab
+                    local_relposes[(marker, other)] = {'pose': pose_ab, 'weight': weight_ab}
+                    local_relposes[(other, marker)] = {'pose': pose_ba, 'weight': weight_ba}
+            print local_relposes
+
+            
+        
     finally:
         channel.close()
         sock.close()
