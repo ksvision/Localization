@@ -1,6 +1,11 @@
 import socket
+import argparse
+from msvcrt import kbhit, getch
+
 from adolphus.geometry import Pose, Point, Rotation
 from hypergraph.core import Edge, Graph
+from hypergraph.path import dijkstra
+from hypergraph.connectivity import connected
 
 # marker class -- not being used, may be removed in the future
 class Marker(object):
@@ -80,8 +85,8 @@ def parse_from_halcon(hstring):
                      frame_markers[marker]['pose'][2]]
         rot_mat = [[] for x in range(3)]
         for i in range(3):
-            rot_mat[i] = [frame_markers[marker]['pose'][3*(i+1)], \
-                          frame_markers[marker]['pose'][3*(i+1)+1], \
+            rot_mat[i] = [frame_markers[marker]['pose'][3*(i+1)],
+                          frame_markers[marker]['pose'][3*(i+1)+1],
                           frame_markers[marker]['pose'][3*(i+1)+2]]
         t = Point(trans_vec)
         r = Rotation.from_rotation_matrix(rot_mat)
@@ -90,11 +95,15 @@ def parse_from_halcon(hstring):
     return frame_markers
 
 def main():
+    # parse command line arguments for <number of markers> and <reference marker id>
+    parser = argparse.ArgumentParser(description='Choose reference marker.')
+    parser.add_argument('num_markers', type=int, help='number of markers')
+    parser.add_argument('ref_id', type=int, help='ID of the reference marker')
+    ui = parser.parse_args()
     # set up network socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(('localhost',5678))
     sock.listen(20)
-
     # accept incoming connection requests
     channel, details = sock.accept()
     channel.settimeout(20)
@@ -103,14 +112,48 @@ def main():
         # initialize empty graph and the global relative poses (GRPs)
         graph = Graph()
         global_relposes = {}
-
+        
         # go through a sequence of data from pre-captured images, imported from Halcon
         # TODO: actual video capture
-        for i in range(7):
+        while(True):
+            # if 'q' is pressed on the keyboard, notify user if not all the markers have been registered ...
+            # ... and also if not all the registered markers have a route back to the reference marker ...
+            # give user the option to exit
+            if kbhit():
+                if ord(getch()) == 113:
+                    try:
+                        # make sure there are vertices in the graph to avoid error with connected()
+                        assert graph.vertices
+                        # warn the user missing vertices or disconnections in the graph
+                        if len(graph.vertices) < ui.num_markers and not connected(graph):
+                            print 'Not all markers are registered.  Also, not all registered markers \
+                                   have a route back to the reference marker.'
+                        elif len(graph.vertices) < ui.num_markers and connected(graph):
+                            print 'Not all markers are registered.'
+                        elif len(graph.vertices) == ui.num_markers and not connected(graph):
+                            print 'Not all markers have a route back to the reference marker.'
+                        else:
+                            pass
+                    finally:
+                        # ask the user if they want to end training mode despite the warning
+                        end = ''
+                        yes_set = set(['y', 'Y', 'yes', 'Yes', 'YES'])
+                        no_set = set(['n', 'N', 'no', 'No', 'NO'])
+                        while(end not in (yes_set | no_set)):
+                            end = raw_input('Do you want to end training mode? (y/n): ')
+                        # end or continue training mode depending on user's choice
+                        if end in yes_set:
+                            break
+                        else:
+                            pass
             # parse the incoming information from halcon (marker IDs, poses, and errors/weights)
             frame_markers = {}
             hstring = channel.recv(65536)
+            if not hstring:
+                continue
             frame_markers = parse_from_halcon(hstring)
+            # update the set of vertices in the graph with the local markers
+            graph.vertices.update(frame_markers)
             # find the local relative poses (LRPs) of the markers w.r.t. one another and use them ...
             # ... to update the GRP and the graph
             local_relposes = {}
@@ -135,7 +178,7 @@ def main():
                         global_relposes[(marker, other)] = local_relposes[(marker, other)]
                         global_relposes[(other, marker)] = local_relposes[(other, marker)]
                         graph.add_edge(Edge((marker, other)), local_relposes[(marker, other)]['weight'])
-                    # however, if it already exists and the weight of the new one is less than the existing one ...
+                    # however, if it already exists and the weight of the new one is less than the existing one, ...
                     # ... replace the existing ones in the GRPs and graph with the new one
                     else:
                         if weight_ab < global_relposes[(marker, other)]['weight']:
@@ -143,8 +186,12 @@ def main():
                             global_relposes[(other, marker)] = local_relposes[(other, marker)]
                             graph.weights[Edge((marker, other))] = weight_ab
             print global_relposes
-
+            print graph.weights
             
+        # obtain the "previous array" of the shortest path as determined by dijkstra's algorithm
+        prev = dijkstra(graph, ui.ref_id)
+        print prev
+
         
     finally:
         channel.close()
