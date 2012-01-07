@@ -58,7 +58,6 @@ class Marker(object):
         Update the marker's error
         """
         self.error = error
-
     
 # parse incoming string data from halcon into python dictionary format
 def parse_from_halcon(hstring):
@@ -71,6 +70,7 @@ def parse_from_halcon(hstring):
     @return: Camera ID and target pose.
     @rtype: C{str}, L{Pose}
     """
+
     frame_markers = {}
     for pair in hstring.split(';'):
         pose = pair.split(':')[1].split(',')
@@ -107,51 +107,77 @@ def main():
     # accept incoming connection requests
     channel, details = sock.accept()
     channel.settimeout(20)
-
     try:
         # initialize empty graph and the global relative poses (GRPs)
         graph = Graph()
         global_relposes = {}
-        
         # go through a sequence of data from pre-captured images, imported from Halcon
         # TODO: actual video capture
+        print '*************** MAP-BUILDING MODE ***************'
         while(True):
-            # if 'q' is pressed on the keyboard, notify user if not all the markers have been registered ...
-            # ... and also if not all the registered markers have a route back to the reference marker ...
-            # give user the option to exit
+            # if a key is pressed
             if kbhit():
-                if ord(getch()) == 113:
-                    try:
-                        # make sure there are vertices in the graph to avoid error with connected()
-                        assert graph.vertices
-                        # warn the user missing vertices or disconnections in the graph
-                        if len(graph.vertices) < ui.num_markers and not connected(graph):
-                            print 'Not all markers are registered.  Also, not all registered markers \
-                                   have a route back to the reference marker.'
-                        elif len(graph.vertices) < ui.num_markers and connected(graph):
-                            print 'Not all markers are registered.'
-                        elif len(graph.vertices) == ui.num_markers and not connected(graph):
-                            print 'Not all markers have a route back to the reference marker.'
-                        else:
-                            pass
-                    finally:
-                        # ask the user if they want to end training mode despite the warning
-                        end = ''
-                        yes_set = set(['y', 'Y', 'yes', 'Yes', 'YES'])
-                        no_set = set(['n', 'N', 'no', 'No', 'NO'])
-                        while(end not in (yes_set | no_set)):
-                            end = raw_input('Do you want to end training mode? (y/n): ')
-                        # end or continue training mode depending on user's choice
+                key = ord(getch())
+                # if 's' is pressed on the keyboard, notify user of all current registered and unconnected markers
+                if key == 115:
+                    curr_prev = dijkstra(graph, ui.ref_id)
+                    print 'Registered markers (', len(graph.vertices), '): ', list(graph.vertices)
+                    print 'Unconnected markers: ', \
+                          [um for um in curr_prev if um != ui.ref_id and curr_prev[um] == None]
+                # if 'q' is pressed on the keyboard, notify user if not all the markers have been registered ...
+                # ... and also if not all the registered markers have a route back to the reference marker ...
+                # give user the option to exit
+                elif key == 113:
+                    end = ''
+                    yes_set = set(['y', 'Y', 'yes', 'Yes', 'YES'])
+                    no_set = set(['n', 'N', 'no', 'No', 'NO'])
+                    # if the reference marker is not registered as a vertex in the graph, tell user they ...
+                    # ... cannot go into online mode without it
+                    # give them option to end the program
+                    if ui.ref_id not in graph.vertices:
+                        print 'The reference marker has not been registered.  You cannot continue to the'
+                        print 'online mode without it.'
+                        end = raw_input('Are you sure you want to end the program? (y/n): ')
                         if end in yes_set:
-                            break
+                            return
                         else:
                             pass
+                    else:
+                        try:
+                            # make sure there are vertices in the graph to avoid error with connected()
+                            assert graph.vertices
+                            # warn the user of missing vertices or disconnections in the graph
+                            if len(graph.vertices) < ui.num_markers and not connected(graph):
+                                print 'Not all markers are registered.  Also, not all registered markers'
+                                print 'have a route back to the reference marker.'
+                            elif len(graph.vertices) < ui.num_markers and connected(graph):
+                                print 'Not all markers are registered.'
+                            elif len(graph.vertices) == ui.num_markers and not connected(graph):
+                                print 'Not all markers have a route back to the reference marker.'
+                            else:
+                                pass
+                        finally:
+                            # ask the user if they want to end map-building mode despite the warning
+                            while(end not in (yes_set | no_set)):
+                                end = raw_input('Do you want to end map-building mode anyway? (y/n): ')
+                            # end or continue map-building mode depending on user's choice
+                            if end in yes_set:
+                                break
+                            else:
+                                pass
             # parse the incoming information from halcon (marker IDs, poses, and errors/weights)
             frame_markers = {}
             hstring = channel.recv(65536)
             if not hstring:
                 continue
-            frame_markers = parse_from_halcon(hstring)
+            elif hstring == 'no markers found':
+                pass
+            # if socket is closed from the other end (halcon), stop the program
+            # elif hstring == 'connection closed':
+                # print '---- CONNECTION CLOSED (HALCON) ----'
+                # return
+            else:
+                frame_markers = parse_from_halcon(hstring)
             # update the set of vertices in the graph with the local markers
             graph.vertices.update(frame_markers)
             # find the local relative poses (LRPs) of the markers w.r.t. one another and use them ...
@@ -187,15 +213,15 @@ def main():
                             graph.weights[Edge((marker, other))] = weight_ab
             print global_relposes
             print graph.weights
-            
+            # send message back to halcon telling it python prog. is done processing frame data and ready for more
+            channel.send('d')   
         # obtain the "previous array" of the shortest path as determined by dijkstra's algorithm
         prev = dijkstra(graph, ui.ref_id)
         print prev
-
-        
     finally:
         channel.close()
         sock.close()
+        print '---- CONNECTION CLOSED (PYTHON) ----'
 
 if __name__ == "__main__":
     main()
