@@ -81,13 +81,13 @@ def parse_from_halcon(hstring):
         frame_markers.update({int(pair.split(':')[0]): \
                            {'pose':pose, 'weight':weight}})
     for marker in frame_markers:
-        trans_vec = [frame_markers[marker]['pose'][0],frame_markers[marker]['pose'][1],\
-                     frame_markers[marker]['pose'][2]]
+        trans_vec = [frame_markers[marker]['pose'][3],frame_markers[marker]['pose'][7],\
+                     frame_markers[marker]['pose'][11]]
         rot_mat = [[] for x in range(3)]
         for i in range(3):
-            rot_mat[i] = [frame_markers[marker]['pose'][3*(i+1)],
-                          frame_markers[marker]['pose'][3*(i+1)+1],
-                          frame_markers[marker]['pose'][3*(i+1)+2]]
+            rot_mat[i] = [frame_markers[marker]['pose'][4*i],
+                          frame_markers[marker]['pose'][4*i+1],
+                          frame_markers[marker]['pose'][4*i+2]]
         t = Point(trans_vec)
         r = Rotation.from_rotation_matrix(rot_mat)
         pose = Pose(t,r)
@@ -107,6 +107,11 @@ def main():
     channel, details = sock.accept()
     channel.settimeout(20)
     try:
+        # acceptable forms of 'yes' and 'no' for quiting prompts
+        end = ''
+        yes_set = set(['y', 'Y', 'yes', 'Yes', 'YES'])
+        no_set = set(['n', 'N', 'no', 'No', 'NO'])
+
         '''-------------------'''
         ''' MAP-BUILDING MODE '''
         '''-------------------'''
@@ -132,9 +137,6 @@ def main():
                 # ... route back to the reference marker
                 # give user the option to exit
                 elif key == 113:
-                    end = ''
-                    yes_set = set(['y', 'Y', 'yes', 'Yes', 'YES'])
-                    no_set = set(['n', 'N', 'no', 'No', 'NO'])
                     # if the reference marker is not registered as a vertex in the graph, tell user they ...
                     # ... cannot go into online mode without it
                     # give them option to end the program
@@ -165,12 +167,12 @@ def main():
                                 break
                             else:
                                 pass
-            # parse the incoming information from halcon (marker IDs, poses, and errors/weights)
+            # parse the incoming data from halcon
             frame_markers = {}
             hstring = channel.recv(65536)
             if not hstring:
                 continue
-            if hstring == 'no markers found':
+            elif hstring == 'no markers found':
                 pass
             # if socket is closed from the other end (halcon), stop the program
             # elif hstring == 'connection closed':
@@ -211,13 +213,79 @@ def main():
                             global_relposes[(marker, other)] = local_relposes[(marker, other)]
                             global_relposes[(other, marker)] = local_relposes[(other, marker)]
                             graph.weights[Edge((marker, other))] = weight_ab
-            print global_relposes
-            print graph.weights
             # send message back to halcon telling it python prog. is done processing frame data and ready for more
-            channel.send('d')   
+            channel.send('d')
         # obtain the "previous array" of the shortest path as determined by dijkstra's algorithm
         prev = dijkstra(graph, ui.ref_id)
-        print prev
+        # find the global pose (and its associated aggregate weight) of each marker in the map w.r.t. the reference marker
+        gmarkposes = {}
+        for marker in prev:
+            pose_comp = Pose()
+            agg_weight = 0.0
+            curr_i = marker
+            prev_i = prev[curr_i]
+            # skip markers that are disconnected from the reference
+            if not prev_i and curr_i != ui.ref_id:
+                continue
+            # loop until reference is reached
+            while prev_i:
+                edge_i = (curr_i, prev_i)
+                pose_comp += global_relposes[edge_i]['pose']
+                agg_weight += global_relposes[edge_i]['weight']
+                curr_i = prev_i
+                prev_i = prev[curr_i]
+            # store the global pose and weight of the marker
+            gmarkposes[marker] = {'pose': pose_comp, 'weight': agg_weight}
+            
+
+        '''-------------'''
+        ''' ONLINE MODE '''
+        '''-------------'''
+        print '\n\n*************** ONLINE MODE ***************'
+        while(True):
+            # if a key is pressed
+            if kbhit():
+                # catch the key
+                key = ord(getch())
+                # if 'q' is pressed on the keyboard, give user the option to exit
+                if key == 113:
+                    end = raw_input('Are you sure you want to end the program? (y/n): ')
+                    if end in yes_set:
+                        return
+                    else:
+                        pass
+            # parse the incoming data from halcon
+            frame_markers = {}
+            hstring = channel.recv(65536)
+            if not hstring:
+                continue
+            elif hstring == 'no markers found':
+                pass
+            # if socket is closed from the other end (halcon), stop the program
+            # elif hstring == 'connection closed':
+                # print '---- CONNECTION CLOSED (HALCON) ----'
+                # return
+            else:
+                frame_markers = parse_from_halcon(hstring)
+            # find the camera pose that yields the minimum aggregate weight of all markers in the frame
+            bestmarker = None
+            bestpose = None
+            minweight = float('inf')
+            for marker in frame_markers:
+                marker_i = frame_markers[marker]
+                gcampose = -marker_i['pose'] + gmarkposes[marker]['pose']
+                gcamweight = marker_i['weight'] + gmarkposes[marker]['weight']
+                if gcamweight < minweight:
+                    bestmarker = marker
+                    bestpose = gcampose
+                    minweight = gcamweight
+            print '----------------------------'
+            print 'through marker: ', bestmarker
+            print 'pose: ', bestpose
+            print 'weight: ', minweight
+            print '----------------------------'
+            # send message back to halcon telling it python prog. is done processing frame data and ready for more
+            channel.send('d')
     finally:
         channel.close()
         sock.close()
