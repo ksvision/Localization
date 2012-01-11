@@ -6,58 +6,6 @@ from adolphus.geometry import Pose, Point, Rotation
 from hypergraph.core import Edge, Graph
 from hypergraph.path import dijkstra
 from hypergraph.connectivity import connected
-
-# marker class -- not being used, may be removed in the future
-class Marker(object):
-    """\
-    Marker class
-    """
-    def __init__(self, ID=None, pose=None, error=None):
-        """\
-        Constructor
-        """
-        self.ID = ID
-        self.pose = pose
-        self.error = error
-
-    @property
-    def get_ID(self):
-        """\
-        Return the marker ID
-        """
-        return self.ID
-
-    @property
-    def get_pose(self):
-        """\
-        Return the marker's pose
-        """
-        return self.pose
-
-    @property
-    def get_error(self):
-        """\
-        Return the marker's error
-        """
-        return self.error
-
-    def update_ID(self, ID):
-        """\
-        Update the marker's ID
-        """
-        self.ID = ID
-
-    def update_pose(self, pose):
-        """\
-        Update the marker's pose
-        """
-        self.pose = pose
-
-    def update_error(self, error):
-        """\
-        Update the marker's error
-        """
-        self.error = error
     
 # parse incoming string data from halcon into python dictionary format
 def parse_from_halcon(hstring):
@@ -115,7 +63,7 @@ def main():
         '''-------------------'''
         ''' MAP-BUILDING MODE '''
         '''-------------------'''
-        print '*************** MAP-BUILDING MODE ***************'
+        print '*************** MAP-BUILDING MODE ***************\n'
         # initialize empty graph and the global relative poses (GRPs)
         graph = Graph()
         global_relposes = {}
@@ -131,7 +79,7 @@ def main():
                 # if 's' is pressed on the keyboard, update user on all current registered and unconnected markers
                 if key == 115:
                     print len(graph.vertices), 'Registered marker(s):', list(graph.vertices)
-                    print len(uc_verts), 'Unconnected marker(s):', uc_verts 
+                    print len(uc_verts), 'Unconnected marker(s):', uc_verts, '\n'
                 # if 'q' is pressed on the keyboard, notify user of all registered markers and also if...
                 # ... (i) reference marker is not registered or (ii) not all registered markers have a ...
                 # ... route back to the reference marker
@@ -241,7 +189,7 @@ def main():
         '''-------------'''
         ''' ONLINE MODE '''
         '''-------------'''
-        print '\n\n*************** ONLINE MODE ***************'
+        print '\n\n*************** ONLINE MODE ***************\n'
         while(True):
             # if a key is pressed
             if kbhit():
