@@ -20,26 +20,29 @@ def parse_from_halcon(hstring):
     """
 
     frame_markers = {}
-    for pair in hstring.split(';'):
-        pose = pair.split(':')[1].split(',')
-        weight = float(pose[len(pose)-1].split('|').pop())
-        pose[len(pose)-1] = pose[len(pose)-1].split('|')[0]
-        for i in range(len(pose)):
-            pose[i] = float(pose[i])
-        frame_markers.update({int(pair.split(':')[0]): \
-                           {'pose':pose, 'weight':weight}})
-    for marker in frame_markers:
-        trans_vec = [frame_markers[marker]['pose'][3],frame_markers[marker]['pose'][7],\
-                     frame_markers[marker]['pose'][11]]
-        rot_mat = [[] for x in range(3)]
-        for i in range(3):
-            rot_mat[i] = [frame_markers[marker]['pose'][4*i],
-                          frame_markers[marker]['pose'][4*i+1],
-                          frame_markers[marker]['pose'][4*i+2]]
-        t = Point(trans_vec)
-        r = Rotation.from_rotation_matrix(rot_mat)
-        pose = Pose(t,r)
-        frame_markers[marker]['pose'] = pose
+    try:
+        for pair in hstring.split(';'):
+            pose = pair.split(':')[1].split(',')
+            weight = float(pose[len(pose)-1].split('|').pop())
+            pose[len(pose)-1] = pose[len(pose)-1].split('|')[0]
+            for i in range(len(pose)):
+                pose[i] = float(pose[i])
+            frame_markers.update({int(pair.split(':')[0]): \
+                               {'pose':pose, 'weight':weight}})
+        for marker in frame_markers:
+            trans_vec = [frame_markers[marker]['pose'][3],frame_markers[marker]['pose'][7],\
+                         frame_markers[marker]['pose'][11]]
+            rot_mat = [[] for x in range(3)]
+            for i in range(3):
+                rot_mat[i] = [frame_markers[marker]['pose'][4*i],
+                              frame_markers[marker]['pose'][4*i+1],
+                              frame_markers[marker]['pose'][4*i+2]]
+            t = Point(trans_vec)
+            r = Rotation.from_rotation_matrix(rot_mat)
+            pose = Pose(t,r)
+            frame_markers[marker]['pose'] = pose
+    except:
+        pass
     return frame_markers
 
 def main():
@@ -118,9 +121,7 @@ def main():
             # parse the incoming data from halcon
             frame_markers = {}
             hstring = channel.recv(65536)
-            if not hstring:
-                continue
-            elif hstring == 'no markers found':
+            if not hstring or hstring == 'no markers found':
                 pass
             # if socket is closed from the other end (halcon), stop the program
             # elif hstring == 'connection closed':
@@ -128,6 +129,7 @@ def main():
                 # return
             else:
                 frame_markers = parse_from_halcon(hstring)
+
             # update the set of vertices in the graph with the local markers
             graph.vertices.update(frame_markers)
             # find the local relative poses (LRPs) of the markers w.r.t. one another and use them ...
@@ -205,9 +207,7 @@ def main():
             # parse the incoming data from halcon
             frame_markers = {}
             hstring = channel.recv(65536)
-            if not hstring:
-                continue
-            elif hstring == 'no markers found':
+            if not hstring or hstring == 'no markers found':
                 pass
             # if socket is closed from the other end (halcon), stop the program
             # elif hstring == 'connection closed':
@@ -220,13 +220,16 @@ def main():
             bestpose = None
             minweight = float('inf')
             for marker in frame_markers:
-                marker_i = frame_markers[marker]
-                gcampose = -marker_i['pose'] + gmarkposes[marker]['pose']
-                gcamweight = marker_i['weight'] + gmarkposes[marker]['weight']
-                if gcamweight < minweight:
-                    bestmarker = marker
-                    bestpose = gcampose
-                    minweight = gcamweight
+                if marker in gmarkposes:
+                    marker_i = frame_markers[marker]
+                    gcampose = -marker_i['pose'] + gmarkposes[marker]['pose']
+                    gcamweight = marker_i['weight'] + gmarkposes[marker]['weight']
+                    if gcamweight < minweight:
+                        bestmarker = marker
+                        bestpose = gcampose
+                        minweight = gcamweight
+                else:
+                    pass
             print '----------------------------'
             print 'through marker: ', bestmarker
             print 'pose: ', bestpose
