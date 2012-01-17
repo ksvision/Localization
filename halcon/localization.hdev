@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hdevelop file_version="1.0" halcon_version="10.0.1" cs="460460861">
+<procedure name="main">
+<interface/>
+<body>
+<l>dev_update_off ()</l>
+<l>dev_close_window ()</l>
+<c></c>
+<c>* folder path</c>
+<l>par_path := 'C:/Users/karam/Desktop/MastersResearch/Repositories/Localization/halcon/parameters/'</l>
+<c></c>
+<c>* read camera's intrinsic parameters</c>
+<l>read_cam_par(par_path+'icubeintrinsicparam.cal', CamParam)</l>
+<c></c>
+<c>* open socket and connect it to an accepting socket</c>
+<l>open_socket_connect('localhost', 5678, ['timeout','protocol'], \
+                    ['infinite','TCP'], osock)</l>
+<c></c>
+<c>* variable for determining which type of threshold method to use</c>
+<l>threshtype := 0</l>
+<c></c>
+<c>* define the set of possible markers</c>
+<l>marker_set := [69, 71, 77, 79, 85, 87, 93, 95, 101, 103, 109, 111, 117,\
+              119, 125, 127, 197, 199, 205, 207, 213, 215, 221, 223, 229,\
+              231, 237, 239, 245, 247, 253, 255]</l>
+<c></c>
+<c>* Image Acquisition</c>
+<l>open_framegrabber ('DirectShow', 1, 1, 0, 0, 0, 0, 'default', 8,\
+                   'rgb', -1, 'false', 'default', 'ICube ', 0, -1,\
+                   AcqHandle)</l>
+<l>grab_image_start (AcqHandle, -1)</l>
+<c></c>
+<c>* grab first image and create a window that fits it</c>
+<l>grab_image_async (Image, AcqHandle, -1)</l>
+<l>dev_open_window_fit_image (Image, 0, 0, -1, -1, WindowHandle)</l>
+<c></c>
+<l>try</l>
+<c>    * TODO: begin video capture</c>
+<l>    while (true)</l>
+<c>        * grab image from image acquisition interface</c>
+<l>        grab_image_async (Image, AcqHandle, -1)</l>
+<c>        </c>
+<c>        * display the image in the window</c>
+<l>        dev_display (Image)</l>
+<c>        </c>
+<c>        * if pose(s) of marker(s) cannot be found, go to next frame</c>
+<l>        try</l>
+<c>            * segment image using one of the threshold methods</c>
+<l>            if (threshtype = 0)</l>
+<l>                fast_threshold (Image, Region, 0, 100, 15)</l>
+<l>            else</l>
+<l>                bin_threshold (Image, Region)</l>
+<l>            endif</l>
+<c>           </c>
+<c>            * separate the region into connected parts</c>
+<l>            connection (Region, ConnectedRegions)</l>
+<c>            </c>
+<c>            * filter out non-marker regions by area</c>
+<l>            select_shape(ConnectedRegions, SelectedRegions1, 'area',\
+                         'and', 150, 300000)</l>
+<c>            </c>
+<c>            * filter out non-marker regions by number of contained holes</c>
+<l>            connect_and_holes (SelectedRegions1, NumConnected, NumHoles)</l>
+<l>            gen_empty_obj(SelectedRegions2)</l>
+<l>            for i := 0 to |NumHoles|-1 by 1</l>
+<l>                if (NumHoles[i] &gt; 0 and NumHoles[i] &lt;= 2)</l>
+<l>                    select_obj (SelectedRegions1, ObjectSelected, i+1)</l>
+<l>                    concat_obj (SelectedRegions2, ObjectSelected,\
+                                SelectedRegions2)</l>
+<l>                    i := i + 1</l>
+<l>                endif</l>
+<l>            endfor</l>
+<c>            </c>
+<c>            * convert remaining regions to contours</c>
+<l>            gen_contour_region_xld (SelectedRegions2, Contours,\
+                                    'border_holes')</l>
+<c>            </c>
+<c>            * count the number of contours</c>
+<l>            count_obj (Contours, NumContours)</l>
+<c>            </c>
+<c>            * compute the area and center of each contour</c>
+<l>            area_center_xld (Contours, Area, Row, Column, PointOrder)</l>
+<c>            </c>
+<c>            * filter out non-marker contours by area ratio </c>
+<c>            * (inner_area/outer_area)</c>
+<l>            gen_empty_obj(SelectedContours)</l>
+<l>            if (|Area| &gt;= 2)</l>
+<l>                i := 0</l>
+<l>                while (i &lt;= |Area|-2)</l>
+<l>                    AreaRatio := Area[i+1]/Area[i]</l>
+<l>                    if (AreaRatio &gt; 0.31 and AreaRatio &lt; 0.4)</l>
+<l>                        select_obj (Contours, ObjectSelected1, i+1)</l>
+<l>                        concat_obj (SelectedContours, ObjectSelected1,\
+                                    SelectedContours)</l>
+<l>                        i := i + 1</l>
+<l>                    endif</l>
+<l>                    i := i + 1</l>
+<l>                endwhile</l>
+<l>            endif</l>
+<c>            </c>
+<c>            * if no desirable contours are detected toggle threshold </c>
+<c>            * method and go to next frame</c>
+<l>            count_obj (SelectedContours, NumSelectedContours)</l>
+<l>            if (NumSelectedContours = 0)</l>
+<c>                * if no contours found, toggle threshold method, send a string</c>
+<c>                * notifying the python prog. of exception, and go to next </c>
+<c>                * frame of vid capture when a response is received</c>
+<l>                threshtype := threshtype xor 1</l>
+<l>                send_data (osock, 'z', 'no markers found', [])</l>
+<l>                *receive_data (osock, 'c', instring, from)</l>
+<l>                continue</l>
+<l>            endif</l>
+<c>            </c>
+<c>            * estimate the poses of the markers using the outer square </c>
+<c>            * borders of each marker</c>
+<l>            try</l>
+<l>                get_rectangle_pose (SelectedContours, CamParam, 0.144,\
+                                    0.144,'nonweighted', 2, PosesArray,\
+                                    CovPoses, Errors)</l>
+<c>            * if pose estimation fails, take out the markers that caused </c>
+<c>            * the failure and only use the good ones</c>
+<l>            catch(Exception1)</l>
+<l>                gen_empty_obj (SelectedContours2)</l>
+<l>                for i := 1 to NumSelectedContours by 1</l>
+<l>                    try</l>
+<l>                        select_obj (SelectedContours, ObjectSelected2, i)</l>
+<l>                        get_rectangle_pose (ObjectSelected2, CamParam,\
+                                            0.144, 0.144, 'nonweighted',\
+                                            2, TempPA, TempCP, TempE)</l>
+<l>                        concat_obj (ObjectSelected2, SelectedContours2,\
+                                    SelectedContours2)</l>
+<l>                    catch(Exception2)</l>
+<l>                        continue</l>
+<l>                    endtry</l>
+<l>                endfor</l>
+<l>                count_obj (SelectedContours2, NumSelectedContours2)</l>
+<l>                if (NumSelectedContours2 &gt; 0)</l>
+<l>                    get_rectangle_pose (SelectedContours2, CamParam,\
+                                        0.144, 0.144, 'nonweighted', 2,\
+                                        PosesArray, CovPoses, Errors)</l>
+<l>                else</l>
+<c>                    * if exception encountered, toggle threshold method, </c>
+<c>                    * send a string notifying the python prog. of </c>
+<c>                    * exception, and go to next frame of vid capture when </c>
+<c>                    * a response is received</c>
+<l>                    threshtype := threshtype xor 1</l>
+<l>                    send_data (osock, 'z', 'no markers found', [])</l>
+<l>                    *receive_data (osock, 'c', instring, from)</l>
+<l>                    continue</l>
+<l>                endif</l>
+<l>            endtry</l>
+<c>                </c>
+<l>        catch (Exception3)</l>
+<c>            * if exception encountered, toggle threshold method, send a </c>
+<c>            * string notifying the python prog. of exception, and go to </c>
+<c>            * next frame of vid capture when a response is received</c>
+<l>            threshtype := threshtype xor 1</l>
+<l>            send_data (osock, 'z', 'no markers found', [])</l>
+<l>            *receive_data (osock, 'c', instring, from)</l>
+<l>            continue</l>
+<l>        endtry</l>
+<c>        </c>
+<c>        * initialize the number of markers in the cf (current frame)</c>
+<l>        NumMarkersCF := |PosesArray|/7</l>
+<c>        </c>
+<c>        * initialize all arrays to store the properties of the markers in the cf</c>
+<l>        tuple_gen_const (0, 0, MarkerIDs)</l>
+<l>        tuple_gen_const (0, 0, HomMatsArray)</l>
+<l>        tuple_gen_const (0, 0, PosesArray1)</l>
+<c>        </c>
+<c>        * loop to go through every marker in the frame</c>
+<l>        for i:= 0 to NumMarkersCF-1 by 1</l>
+<c>            </c>
+<c>            * select pose of current marker</c>
+<l>            tuple_select_range (PosesArray, 7*i, 7*i + 6, Pose)</l>
+<c>            </c>
+<c>            * move origin to the upper left corner of the marker</c>
+<l>            set_origin_pose (Pose, -0.03668, -0.03668, 0, Pose)</l>
+<c>            </c>
+<l>            *disp_3d_coord_system (WindowHandle, CamParam, Pose, 0.072)</l>
+<c>            </c>
+<c>            * refine the image so the marker is displayed with no persp. distortion</c>
+<l>            image_to_world_plane (Image, ImageRefined, CamParam, Pose,\
+                                  72.54, 72.54, 'mm', 'bilinear')</l>
+<c>            </c>
+<c>            * enhance the contrast of the marker to make dark/light regions darker/lighter</c>
+<l>            scale_image_max (ImageRefined, ImageRefined)</l>
+<c>            </c>
+<c>            * generate the regions for code cell sampling</c>
+<l>            gen_rectangle1 (RectTL, 4, 4, 20, 20)</l>
+<l>            gen_rectangle1 (RectTM, 4, 27, 20, 43)</l>
+<l>            gen_rectangle1 (RectTR, 4, 51, 20, 68)</l>
+<l>            gen_rectangle1 (RectML, 27, 4, 43, 20)</l>
+<l>            gen_rectangle1 (RectMM, 27, 27, 43, 43)</l>
+<l>            gen_rectangle1 (RectMR, 27, 51, 43, 68)</l>
+<l>            gen_rectangle1 (RectBL, 51, 4, 68, 20)</l>
+<l>            gen_rectangle1 (RectBM, 51, 27, 68, 43)</l>
+<l>            gen_rectangle1 (RectBR, 51, 51, 68, 68)</l>
+<l>            gen_empty_obj (RegionsSampling)</l>
+<l>            concat_obj (RectBR, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectBM, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectBL, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectMR, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectMM, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectML, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectTR, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectTM, RegionsSampling, RegionsSampling)</l>
+<l>            concat_obj (RectTL, RegionsSampling, RegionsSampling)</l>
+<c>            </c>
+<c>            * calculate the mean gray value in each cell of the marker code</c>
+<l>            intensity (RegionsSampling, ImageRefined, MeanGray,\
+                       DeviationGray)</l>
+<c>            </c>
+<c>            * convert gray values of code to binary code</c>
+<l>            tuple_gen_const (9, 0, CodeTemp)</l>
+<l>            for i := 0 to |CodeTemp|-1 by 1</l>
+<l>                if (MeanGray[i] &lt; 100)</l>
+<l>                    CodeTemp[i] := 1</l>
+<l>                endif</l>
+<l>            endfor</l>
+<c>            </c>
+<c>            * define the binary representations of the 4 corners seperately</c>
+<l>            TLcorner := CodeTemp[0]</l>
+<l>            TRcorner := CodeTemp[2]</l>
+<l>            BLcorner := CodeTemp[6]</l>
+<l>            BRcorner := CodeTemp[8]</l>
+<c>            </c>
+<c>            * if the total number of black corner cells is not 3,</c>
+<c>            * decrease number of markers by 1, toggle threshold method,</c>
+<c>            * and go to next marker...</c>
+<c>            * BUT if number of markers is now 0, throw an exception to end</c>
+<c>            * the program</c>
+<l>            if (TLcorner + TRcorner + BLcorner + BRcorner # 3)</l>
+<l>                threshtype := threshtype xor 1</l>
+<l>                NumMarkersCF := NumMarkersCF - 1</l>
+<l>                if (NumMarkersCF = 0)</l>
+<l>                    break</l>
+<l>                endif</l>
+<l>                continue</l>
+<l>            endif</l>
+<c>            </c>
+<l>            *dev_display (Image)</l>
+<c>            </c>
+<c>            * bring coord. system origin back to center of marker</c>
+<l>            set_origin_pose (Pose, 0.03668, 0.03668, 0, Pose)</l>
+<c>            </c>
+<c>            * convert marker's pose to hom. 3d matrix so transformations </c>
+<c>            * can be applied</c>
+<l>            pose_to_hom_mat3d (Pose, HomMat3D)</l>
+<c>            </c>
+<c>            * create an empty tuple for the true code of the marker</c>
+<l>            tuple_gen_const (9, 0, Code)</l>
+<c>            </c>
+<c>            * rearrange the temp. code &amp; transform the temp. coord. system</c>
+<c>            * to find the true code and coord. system orientation</c>
+<l>            if (TLcorner = 0)</l>
+<l>                Code := CodeTemp</l>
+<l>            elseif (TRcorner = 0)</l>
+<l>                for i := 0 to 2 by 1</l>
+<l>                    for j := 0 to 2 by 1</l>
+<l>                        Code[3*i+j] := CodeTemp[2+3*j-i]</l>
+<l>                    endfor</l>
+<l>                endfor</l>
+<l>                hom_mat3d_rotate_local (HomMat3D, 1.57079, 'z', HomMat3D)</l>
+<l>            elseif (BLcorner = 0)</l>
+<l>                for i := 0 to 2 by 1</l>
+<l>                    for j := 0 to 2 by 1</l>
+<l>                        Code[3*i+j] := CodeTemp[6-3*j+i]</l>
+<l>                    endfor</l>
+<l>                endfor</l>
+<l>                hom_mat3d_rotate_local (HomMat3D, -1.57079, 'z', HomMat3D)</l>
+<l>            else</l>
+<l>                tuple_inverse (CodeTemp, Code)</l>
+<l>                hom_mat3d_rotate_local (HomMat3D, 3.14159, 'z', HomMat3D)</l>
+<l>            endif</l>
+<c>            </c>
+<c>            * convert the transformed hom. 3d matrix back to a pose</c>
+<l>            hom_mat3d_to_pose (HomMat3D, Pose)</l>
+<c>            </c>
+<l>            *disp_3d_coord_system (WindowHandle, CamParam, Pose, 0.072)</l>
+<c>            </c>
+<c>            * convert the code from tuple to decimal, let the result be </c>
+<c>            * the marker ID</c>
+<l>            MarkerID := 0</l>
+<l>            for i := 0 to 8 by 1</l>
+<l>                MarkerID := MarkerID + Code[8-i]*pow(2,i)</l>
+<l>            endfor</l>
+<c>            </c>
+<c>            * append current marker's ID and pose to arrays</c>
+<l>            tuple_concat (MarkerIDs, MarkerID, MarkerIDs)</l>
+<l>            tuple_concat (HomMatsArray, HomMat3D, HomMatsArray)</l>
+<l>            tuple_concat (PosesArray1, Pose, PosesArray1)</l>
+<l>        endfor</l>
+<c>        </c>
+<c>        * display the coordinate systems of the markers</c>
+<l>        for i := 0 to NumMarkersCF-1 by 1</l>
+<l>            tuple_select_range (PosesArray1, 7*i, 7*i+6, Pose)</l>
+<l>            disp_3d_coord_system (WindowHandle, CamParam, Pose, 0.072)</l>
+<l>        endfor</l>
+<c>         </c>
+<c>        * normalize the errors</c>
+<l>        NormErrors := []</l>
+<l>        for i := 0 to NumMarkersCF-1 by 1</l>
+<l>            NormErrors[i] := Errors[i]*PosesArray1[7*i+2]</l>
+<l>        endfor</l>
+<c>         </c>
+<c>        *convert marker IDs tuple to integers</c>
+<l>        tuple_int (MarkerIDs, MarkerIDs)</l>
+<c>        *convert marker IDs and hom mats tuples to arrays of strings</c>
+<l>        tuple_string (MarkerIDs, '.1d', MarkerIDsStrings)</l>
+<l>        tuple_string (HomMatsArray, '.8f', HomMatsStrings)</l>
+<l>        tuple_string (NormErrors, '.8f', NormErrorsString)</l>
+<c>         </c>
+<c>        * create markerID/pose string to send through socket</c>
+<c>        * format:   markerID[0]:pose[0]|error[0];....</c>
+<l>        outstring := ''</l>
+<l>        for i := 0 to NumMarkersCF-1 by 1</l>
+<l>            outstring := outstring + MarkerIDsStrings[i] + ':'</l>
+<l>            for j := 0 to 11 by 1</l>
+<l>                outstring := outstring + HomMatsStrings[12*i+j]</l>
+<l>                if (j = 11 and i # NumMarkersCF-1)</l>
+<l>                    outstring := outstring + '|' + NormErrorsString[i] + ';'</l>
+<l>                elseif (j = 11 and i = NumMarkersCF-1)</l>
+<l>                    outstring := outstring + '|' + NormErrorsString[i]</l>
+<l>                    break</l>
+<l>                else</l>
+<l>                    outstring := outstring + ','</l>
+<l>                endif</l>
+<l>            endfor</l>
+<l>        endfor</l>
+<c>         </c>
+<c>        * send string (data) through socket, wait for notification from </c>
+<c>        * other end that the program has processed the data and is waiting</c>
+<c>        * for the next string</c>
+<l>        i := 0</l>
+<l>        try</l>
+<l>            send_data (osock, 'z65536', outstring, [])</l>
+<l>            *receive_data (osock, 'c', instring, from)</l>
+<l>        catch(Exception5)</l>
+<l>            break</l>
+<l>        endtry</l>
+<l>    endwhile</l>
+<l>catch(Exception6)</l>
+<l>endtry</l>
+<c></c>
+<c>* close framegrabber</c>
+<l>close_framegrabber (AcqHandle)</l>
+<c></c>
+<c>* notify python prog. that the connection is closed</c>
+<l>*send_data (osock, 'z', 'connection closed', [])</l>
+<c>* close socket</c>
+<l>close_socket (osock)</l>
+</body>
+<docu id="main">
+<parameters/>
+</docu>
+</procedure>
+</hdevelop>
