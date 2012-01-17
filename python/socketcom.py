@@ -56,7 +56,10 @@ def main():
     sock.listen(20)
     # accept incoming connection requests
     channel, details = sock.accept()
-    channel.settimeout(20)
+    #channel.settimeout(20)
+    # create a text file for poses
+    filename = 'ourposes.txt'
+    FILE = open(filename, 'w')
     try:
         # acceptable forms of 'yes' and 'no' for quiting prompts
         end = ''
@@ -164,9 +167,14 @@ def main():
                             global_relposes[(other, marker)] = local_relposes[(other, marker)]
                             graph.weights[Edge((marker, other))] = weight_ab
             # send message back to halcon telling it python prog. is done processing frame data and ready for more
-            channel.send('d')
+            #channel.send('d')
+        # write the graph information to file
+        FILE.write('------ GRAPH ------\n\n')
+        FILE.write(str(graph)+'\n\n')
         # obtain the "previous array" of the shortest path as determined by dijkstra's algorithm
         prev = dijkstra(graph, ui.ref_id)
+        # write title of section (marker poses) to file
+        FILE.write('------ MARKER POSES ------\n\n')
         # find the global pose (and its associated aggregate weight) of each marker in the map w.r.t. the reference marker
         gmarkposes = {}
         for marker in prev:
@@ -186,12 +194,19 @@ def main():
                 prev_i = prev[curr_i]
             # store the global pose and weight of the marker
             gmarkposes[marker] = {'pose': pose_comp, 'weight': agg_weight}
-            
+            # write the global pose to the file
+            FILE.write(str(marker)+': '+str(gmarkposes[marker])+'\n\n')
+        FILE.write('------------------------------------------------------\n\n')
+        
 
         '''-------------'''
         ''' ONLINE MODE '''
         '''-------------'''
         print '\n\n*************** ONLINE MODE ***************\n'
+        # write title of section (marker poses) to file
+        FILE.write('------ ONLINE MODE ------\n\n')
+        # data is initially not recorded to file
+        rec = 0
         while(True):
             # if a key is pressed
             if kbhit():
@@ -204,6 +219,9 @@ def main():
                         return
                     else:
                         pass
+                # if key is 'r', toggle recording of data to file
+                if key == 114:
+                    rec = rec ^ 1
             # parse the incoming data from halcon
             frame_markers = {}
             hstring = channel.recv(65536)
@@ -235,9 +253,16 @@ def main():
             print 'pose: ', bestpose
             print 'weight: ', minweight
             print '----------------------------'
+            # if record toggle is on, record the poses to file
+            if rec == 1:
+                if (bestpose):
+                    temp = str(bestpose.T).split(',')
+                    bestpose_str = temp[0][1:] + ' ' + temp[1][1:]
+                    FILE.write(bestpose_str+'\n')
             # send message back to halcon telling it python prog. is done processing frame data and ready for more
-            channel.send('d')
+            #channel.send('d')
     finally:
+        FILE.close()
         channel.close()
         sock.close()
         print '---- CONNECTION CLOSED (PYTHON) ----'
